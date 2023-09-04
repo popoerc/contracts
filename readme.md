@@ -5,11 +5,11 @@ Open source codes for Popo Ecosystem. LET's BUDL!
 
 ## Official Links
 
-- Contract address: [0x80Db5d0e00c70fEa529B0BF3c93E783e45413fEd](https://etherscan.io/token/0x80Db5d0e00c70fEa529B0BF3c93E783e45413fEd)
+- Contract address: [0xC73A05542f14a7De7082b71e07b4aCe6D75C7450](https://etherscan.io/token/0xC73A05542f14a7De7082b71e07b4aCe6D75C7450)
 - Website: https://popothepanda.com
 - Docs: https://docs.popothepanda.com
 - X: https://x.com/popoerc
-- Telegram: https://t.me/popothepanda
+- Telegram: https://t.me/popopandaeth
 
 ## About $POPO
 
